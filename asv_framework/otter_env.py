@@ -7,7 +7,6 @@ reset/step interface for data collection and controller testing.
 from __future__ import annotations
 
 import numpy as np
-import math
 
 from .paths import add_vendor_paths
 
@@ -29,7 +28,6 @@ class OtterEnv:
         current_speed: ocean current speed [m/s]
         current_beta_deg: ocean current direction [deg]
         tau_X: surge force used by the heading autopilot [N]
-        thrust_commands: if True, interpret u_control as thrusts [N] per prop (bypass rev inputs)
     """
 
     def __init__(
@@ -40,7 +38,6 @@ class OtterEnv:
         current_speed: float = 0.0,
         current_beta_deg: float = 0.0,
         tau_X: float = 120.0,
-        thrust_commands: bool = True,
     ) -> None:
         control_mode = (
             "headingAutopilot" if use_autopilot else "stepInput"
@@ -58,7 +55,6 @@ class OtterEnv:
         self.nu = self.vehicle.nu.copy()
         self.u_actual = self.vehicle.u_actual.copy()
         self.use_autopilot = use_autopilot
-        self.thrust_commands = thrust_commands
 
     def reset(self, eta: np.ndarray | None = None, nu: np.ndarray | None = None) -> None:
         """
@@ -73,25 +69,12 @@ class OtterEnv:
         self.nu = self.vehicle.nu.copy() if nu is None else np.array(nu, float)
         self.u_actual = self.vehicle.u_actual.copy()
 
-    def _thrust_to_revs(self, thrust: np.ndarray) -> np.ndarray:
-        """
-        Convert thrust commands [N] to propeller revs [rad/s] using Bollard curves.
-        """
-        n_cmd = np.zeros(2, dtype=float)
-        for i in range(2):
-            if thrust[i] >= 0:
-                n_cmd[i] = math.sqrt(abs(thrust[i]) / self.vehicle.k_pos)
-            else:
-                n_cmd[i] = -math.sqrt(abs(thrust[i]) / self.vehicle.k_neg)
-            n_cmd[i] = np.clip(n_cmd[i], self.vehicle.n_min, self.vehicle.n_max)
-        return n_cmd
-
     def step(self, u_control: np.ndarray | None = None) -> dict:
         """
         Advance one timestep.
 
         Args:
-            u_control: propeller commands [n1, n2] (rad/s) unless thrust_commands=True, then [F1,F2] in N.
+            u_control: propeller rev commands [n1, n2] (rad/s).
                        Ignored when autopilot is on.
         Returns:
             info dictionary with time, pose, velocities, control, and actual propeller states.
@@ -103,8 +86,6 @@ class OtterEnv:
                 u_cmd = np.zeros(2, dtype=float)
             else:
                 u_cmd = np.array(u_control, float)
-                if self.thrust_commands:
-                    u_cmd = self._thrust_to_revs(u_cmd)
 
         self.nu, self.u_actual = self.vehicle.dynamics(
             self.eta, self.nu, self.u_actual, u_cmd, self.sample_time
@@ -121,19 +102,21 @@ class OtterEnv:
         }
 
     @staticmethod
-    def to_planar(sample: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def to_planar(sample: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract planar state-action tuples suitable for SE(2) learning.
 
         Args:
             sample: dict from `step`
         Returns:
-            q = [x, y, psi], q_dot = [u, v, r], u = [n1, n2]
+            q = [x, y, psi], q_dot = [u, v, r], u_cmd = [n1, n2], u_actual = [n1, n2]
         """
         eta = sample["eta"]
         nu = sample["nu"]
         u_cmd = sample["u_control"]
+        u_actual = sample["u_actual"]
         q = np.array([eta[0], eta[1], eta[5]], dtype=float)
         q_dot = np.array([nu[0], nu[1], nu[5]], dtype=float)
-        u = np.array(u_cmd, dtype=float)
-        return q, q_dot, u
+        u_cmd = np.array(u_cmd, dtype=float)
+        u_actual = np.array(u_actual, dtype=float)
+        return q, q_dot, u_cmd, u_actual

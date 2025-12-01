@@ -19,7 +19,20 @@ class OtterStepDataset(Dataset):
         data = np.load(npz_path)
         self.q = data["q"]  # shape: [episodes, steps, 3]
         self.q_dot = data["q_dot"]  # shape: [episodes, steps, 3]
-        self.u = data["u"]  # shape: [episodes, steps, 2]
+        # Prefer actual actuator values if present; fall back to commanded for older files
+        if "u_actual" in data:
+            self.u = data["u_actual"]
+        else:
+            self.u = data["u"]
+            
+        if "u_control" in data:
+            self.u_cmd = data["u_control"]
+        elif "u_cmd" in data:
+            self.u_cmd = data["u_cmd"]
+        else:
+            # Fallback if no command is stored (e.g. old data), assume u_cmd approx u_actual
+            self.u_cmd = self.u
+
         # dt may be saved as a scalar or length-E array; take the first entry
         self.dt = float(np.asarray(data["dt"]).reshape(-1)[0])
         self.horizon = max(1, int(horizon))
@@ -41,15 +54,20 @@ class OtterStepDataset(Dataset):
             q = torch.tensor(self.q[ep, k], dtype=torch.float32)
             q_dot = torch.tensor(self.q_dot[ep, k], dtype=torch.float32)
             u = torch.tensor(self.u[ep, k], dtype=torch.float32)
+            u_cmd = torch.tensor(self.u_cmd[ep, k], dtype=torch.float32)
 
             q_next = torch.tensor(self.q[ep, k + 1], dtype=torch.float32)
             q_dot_next = torch.tensor(self.q_dot[ep, k + 1], dtype=torch.float32)
 
             y0 = torch.cat((q, q_dot, u), dim=0)
             y_target = torch.cat((q_next, q_dot_next), dim=0)
-            return y0, y_target, self.dt
+            # Return u_cmd as extra info
+            return y0, y_target, self.dt, u_cmd
         else:
             q_seq = torch.tensor(self.q[ep, k : k + self.horizon + 1], dtype=torch.float32)
             qd_seq = torch.tensor(self.q_dot[ep, k : k + self.horizon + 1], dtype=torch.float32)
+            # u_seq contains ACTUAL u for the sequence
             u_seq = torch.tensor(self.u[ep, k : k + self.horizon], dtype=torch.float32)
-            return q_seq, qd_seq, u_seq, self.dt
+            # u_cmd_seq contains COMMANDED u for the sequence
+            u_cmd_seq = torch.tensor(self.u_cmd[ep, k : k + self.horizon], dtype=torch.float32)
+            return q_seq, qd_seq, u_seq, self.dt, u_cmd_seq
