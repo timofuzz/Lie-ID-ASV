@@ -1,18 +1,3 @@
-"""
-Hamiltonian Neural ODE on SE(2) for surface vehicle dynamics.
-
-This implements a structure-preserving neural ODE that learns ASV dynamics while
-respecting the geometric and physical constraints of Hamiltonian mechanics on SE(2).
-
-Key Features:
-- Physics-informed architecture with learned mass, damping, and actuation
-- Structured actuation matrix for differential-drive constraints
-- Proper Coriolis forces including mass terms
-- Explicit actuator dynamics modeling
-
-Author: [Your Name]
-Date: 2024
-"""
 from __future__ import annotations
 
 import torch
